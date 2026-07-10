@@ -1,0 +1,186 @@
+$script:Results = @()
+
+function Add-Result {
+    param(
+        [string]$Task,
+        [bool]$Passed,
+        [string]$Details = ""
+    )
+
+    if ($Passed) {
+        Write-Host "$Task - PASSED" -ForegroundColor Green
+    }
+    else {
+        if ($Details) {
+            Write-Host "$Task - FAILED - $Details" -ForegroundColor Red
+        }
+        else {
+            Write-Host "$Task - FAILED" -ForegroundColor Red
+        }
+    }
+
+    $script:Results += [PSCustomObject]@{
+        Task   = $Task
+        Status = if ($Passed) { "PASSED" } else { "FAILED" }
+        Details = $Details
+    }
+}
+
+#########################################################
+# Task: Review Exports Folder
+#########################################################
+
+$ExportFolder = "D:\Programfiles\Apache\Tomcat 9.0\webapps\root\files\export"
+
+try {
+    Add-Result "Review Exports Folder" (Test-Path $ExportFolder) "Folder not found"
+}
+catch {
+    Add-Result "Review Exports Folder" $false $_.Exception.Message
+}
+
+#########################################################
+# Task: Apache (Tomcat9) Service
+#########################################################
+
+try {
+
+    $svc = Get-Service -Name "Tomcat9" -ErrorAction Stop
+
+    $startup = (Get-CimInstance Win32_Service -Filter "Name='Tomcat9'").StartMode
+
+    $passed = ($svc.Status -eq "Running") -and ($startup -eq "Auto")
+
+    Add-Result "Apache Service Running" $passed "Status=$($svc.Status), Startup=$startup"
+
+}
+catch {
+    Add-Result "Apache Service Running" $false $_.Exception.Message
+}
+
+#########################################################
+# Task: Amazon CloudWatch Agent
+#########################################################
+
+try {
+
+    $svc = Get-Service -Name "AmazonCloudWatchAgent" -ErrorAction Stop
+
+    Add-Result "CloudWatch Agent Running" ($svc.Status -eq "Running") "Status=$($svc.Status)"
+
+}
+catch {
+    Add-Result "CloudWatch Agent Running" $false $_.Exception.Message
+}
+
+#########################################################
+# Task: Review Tomcat Memory
+#########################################################
+
+try {
+
+    $regPath = "HKLM:\SOFTWARE\Wow6432Node\Apache Software Foundation\Procrun 2.0\Tomcat9\Parameters\Java"
+
+    if (!(Test-Path $regPath)) {
+        throw "Tomcat registry not found."
+    }
+
+    $props = Get-ItemProperty $regPath
+
+    $JvmMs = [int]$props.JvmMs
+    $JvmMx = [int]$props.JvmMx
+
+    $passed = ($JvmMs -ge 4096) -and ($JvmMx -ge 6144)
+
+    Add-Result "Review Min/Max Memory" $passed "JvmMs=$JvmMs MB, JvmMx=$JvmMx MB"
+
+}
+catch {
+    Add-Result "Review Min/Max Memory" $false $_.Exception.Message
+}
+
+#########################################################
+# Task: Review Java Options
+#########################################################
+
+try {
+
+    $regPath = "HKLM:\SOFTWARE\Wow6432Node\Apache Software Foundation\Procrun 2.0\Tomcat9\Parameters\Java"
+
+    if (!(Test-Path $regPath)) {
+        throw "Tomcat registry not found."
+    }
+
+    $props = Get-ItemProperty $regPath
+
+    $options = @()
+
+    if ($props.Options) {
+        $options += $props.Options
+    }
+
+    if ($props.Options9) {
+        $options += $props.Options9
+    }
+
+    $requiredOption = "-Ddeenv:env:test"
+
+    $passed = $options -contains $requiredOption
+
+    Add-Result "Review Java Options" $passed "Required option missing"
+
+}
+catch {
+    Add-Result "Review Java Options" $false $_.Exception.Message
+}
+
+#########################################################
+# Task: Check LOCAL SERVICE Permissions
+#########################################################
+
+try {
+
+    $Folder = "D:\Programfiles\Apache\Tomcat 9.0\webapps\root"
+
+    if (!(Test-Path $Folder)) {
+        throw "Folder not found."
+    }
+
+    $acl = Get-Acl $Folder
+
+    $found = $false
+
+    foreach ($ace in $acl.Access) {
+
+        if (
+            $ace.IdentityReference.Value -match "LOCAL SERVICE" -and
+            $ace.FileSystemRights.ToString().Contains("FullControl") -and
+            $ace.InheritanceFlags.ToString().Contains("ContainerInherit") -and
+            $ace.InheritanceFlags.ToString().Contains("ObjectInherit")
+        ) {
+            $found = $true
+            break
+        }
+    }
+
+    Add-Result "LOCAL SERVICE Permissions" $found "LOCAL SERVICE Full Control (OI)(CI) not found"
+
+}
+catch {
+    Add-Result "LOCAL SERVICE Permissions" $false $_.Exception.Message
+}
+
+#########################################################
+# Summary
+#########################################################
+
+Write-Host ""
+Write-Host "==================== Summary ====================" -ForegroundColor Cyan
+
+$Results | Format-Table -AutoSize
+
+$failed = @($Results | Where-Object Status -eq "FAILED")
+
+Write-Host ""
+Write-Host ("Passed : {0}" -f ($Results.Count - $failed.Count))
+Write-Host ("Failed : {0}" -f $failed.Count)
