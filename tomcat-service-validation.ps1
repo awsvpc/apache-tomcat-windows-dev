@@ -171,6 +171,96 @@ catch {
 }
 
 #########################################################
+# Task: Check Required Log Files
+#########################################################
+
+try {
+
+    $logChecks = @(
+        "D:\Apache\Tomcat 9.0\logs\stdout*.log",
+        "D:\Apache\Tomcat 9.0\logs\stderror*.log",
+        "D:\Apache\Tomcat 9.0\logs\catalina.log",
+        "D:\Apache\Tomcat 9.0\logs\localhost_access.log"
+    )
+
+    $missing = @()
+
+    foreach ($pattern in $logChecks) {
+
+        if (-not (Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue)) {
+            $missing += $pattern
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Add-Result "Check Log Files Exist" $true
+    }
+    else {
+        Add-Result "Check Log Files Exist" $false ("Missing: " + ($missing -join ", "))
+    }
+
+}
+catch {
+    Add-Result "Check Log Files Exist" $false $_.Exception.Message
+}
+
+#########################################################
+# Task: Review Logs for Errors
+#########################################################
+
+try {
+
+    $logFolder = "D:\Apache\Tomcat 9.0\logs"
+
+    $keywords = @(
+        "access denied",
+        "not found",
+        "warning",
+        "error",
+        "failed",
+        "runtime mismatch"
+    )
+
+    $matches = @()
+
+    Get-ChildItem $logFolder -File | ForEach-Object {
+
+        $found = Select-String `
+            -Path $_.FullName `
+            -Pattern $keywords `
+            -SimpleMatch `
+            -ErrorAction SilentlyContinue
+
+        if ($found) {
+
+            $matches += $_.FullName
+
+            Write-Host ""
+            Write-Host "Issues found in:" -ForegroundColor Yellow
+            Write-Host $_.FullName -ForegroundColor Cyan
+
+            $found |
+                Select-Object -First 10 |
+                ForEach-Object {
+                    Write-Host ("Line {0}: {1}" -f $_.LineNumber, $_.Line.Trim())
+                }
+        }
+
+    }
+
+    if ($matches.Count -eq 0) {
+        Add-Result "Review Log Errors" $true
+    }
+    else {
+        Add-Result "Review Log Errors" $false ("Errors found in $($matches.Count) log(s)")
+    }
+
+}
+catch {
+    Add-Result "Review Log Errors" $false $_.Exception.Message
+}
+
+#########################################################
 # Summary
 #########################################################
 
