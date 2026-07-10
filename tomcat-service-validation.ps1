@@ -261,6 +261,42 @@ catch {
 }
 
 #########################################################
+# Task: Validate Application URL
+#########################################################
+
+try {
+
+    $hostname = $env:COMPUTERNAME.ToLower()
+
+    if ($hostname.StartsWith("pd")) {
+        $url = "http://prod.testdomain.org/index.html"
+    }
+    elseif ($hostname.StartsWith("ts")) {
+        $url = "http://test.testdomain.org/index.html"
+    }
+    else {
+        $url = "http://nonimpl.testdomain.org/index.html"
+    }
+
+    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30
+
+    $passed = ($response.StatusCode -eq 200) -and
+              ($response.Headers.'Content-Type' -match 'text/html')
+
+    if ($passed) {
+        Add-Result "Validate Application URL" $true
+    }
+    else {
+        Add-Result "Validate Application URL" $false `
+            "URL=$url Status=$($response.StatusCode) ContentType=$($response.Headers.'Content-Type')"
+    }
+
+}
+catch {
+    Add-Result "Validate Application URL" $false $_.Exception.Message
+}
+
+#########################################################
 # Summary
 #########################################################
 
